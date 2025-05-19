@@ -38,53 +38,34 @@ $outFolderAbsolute = Join-Path -Path (Get-Location) -ChildPath $outFolder
 # Get all subfolders recursively
 $subfolders = Get-ChildItem -Path $inFolderAbsolute -Directory -Recurse
 
-# Check ffmpeg location
-$ffmpegCurrentDir = Join-Path -Path (Get-Location) -ChildPath "ffmpeg.exe"
-$ffmpegPath = "ffmpeg"
+function Get-ProgramPath {
+    param (
+        [Parameter(Mandatory)]
+        [string]$ProgramName
+    )
 
-if (Test-Path $ffmpegCurrentDir) {
-    Write-Host "ffmpeg found in script directory"
-    $ffmpegPath = $ffmpegCurrentDir
-}
-elseif (Get-Command $ffmpegPath -ErrorAction SilentlyContinue) {
-    Write-Host "ffmpeg found in PATH"
-}
-else {
-    Write-Error "ffmpeg was not found"
-    exit 1
-}
+    $programExe = "$ProgramName.exe"
+    $currentDirPath = Join-Path -Path (Get-Location) -ChildPath $programExe
+    $pathName = $ProgramName
 
-# Check ffprobe location
-$ffprobeCurrentDir = Join-Path -Path (Get-Location) -ChildPath "ffprobe.exe"
-$ffprobePath = "ffprobe"
-
-if (Test-Path $ffprobeCurrentDir) {
-    Write-Host "ffprobe found in script directory"
-    $ffprobePath = $ffprobeCurrentDir
-}
-elseif (Get-Command $ffprobePath -ErrorAction SilentlyContinue) {
-    Write-Host "ffprobe found in PATH"
-}
-else {
-    Write-Error "ffprobe was not found"
-    exit 1
+    if (Test-Path $currentDirPath) {
+        Write-Host "$ProgramName found in script directory"
+        return $currentDirPath
+    }
+    elseif (Get-Command $pathName -ErrorAction SilentlyContinue) {
+        Write-Host "$ProgramName found in system PATH"
+        return $pathName
+    }
+    else {
+        Write-Host "$ProgramName was not found"
+        return ""
+    }
 }
 
-# Check magick location
-$magickCurrentDir = Join-Path -Path (Get-Location) -ChildPath "magick.exe"
-$magickPath = "magick"
-
-if (Test-Path $magickCurrentDir) {
-    Write-Host "magick found in script directory"
-    $magickPath = $magickCurrentDir
-}
-elseif (Get-Command $magickPath -ErrorAction SilentlyContinue) {
-    Write-Host "magick found in PATH"
-}
-else {
-    Write-Error "magick was not found"
-    exit 1
-}
+# Check the locations of ffmpeg, ffprobe, and magick
+$ffmpegPath = Get-ProgramPath -ProgramName "ffmpeg"
+$ffprobePath = Get-ProgramPath -ProgramName "ffprobe"
+$magickPath = Get-ProgramPath -ProgramName "magick"
 
 # Iterate through each subfolder and create the same structure inside the destination folder
 $subfolders | ForEach-Object {
@@ -105,8 +86,22 @@ Write-Output "Created the folder structure if required"
 
 $files = Get-ChildItem -Path $inFolder -File -Recurse
 
+$videoFiles = $files | Where-Object { $vidExtensions -contains $_.Extension.ToLower() }
+
+# Make sure ffmpeg is installed if required
+if ($videoFiles | Select-Object -First 1 -And $ffmpegPath -eq "") {
+    Write-Error "There are video files inside the input folder, but ffmpeg is not installed"
+    exit 1
+}
+
+# Make sure ffprobe is installed if required
+if ($videoFiles | Select-Object -First 1 -And $ffprobePath -eq "") {
+    Write-Error "There are video files inside the input folder, but ffprobe is not installed"
+    exit 1
+}
+
 # Iterate over each video file in the input folder
-$files | Where-Object { $vidExtensions -contains $_.Extension.ToLower() } | ForEach-Object {
+$videoFiles | ForEach-Object {
     $inputFile = $_.FullName
     $baseName = $_.BaseName
     $relativePath = $_.FullName.Substring($inFolderAbsolute.Length).TrimStart('\')
@@ -159,7 +154,7 @@ $files | Where-Object { $vidExtensions -contains $_.Extension.ToLower() } | ForE
         "-preset", "$videoEncodingSpeed",
         "-crf", "$videoQualityCrf",
         "-pix_fmt", "yuv420p",
-        "-c:a", "libmp3lame",
+        "-c:a", "libfdk_aac",
         "-b:a", "$audioBitrateSetting"
     )
     # Add the scaling filter if the height is 1440 or higher
@@ -175,8 +170,16 @@ $files | Where-Object { $vidExtensions -contains $_.Extension.ToLower() } | ForE
     Start-Process -NoNewWindow -FilePath $ffmpegPath -ArgumentList $ffmpegArgs -Wait -PassThru
 }
 
+$imageFiles = $files | Where-Object { $imgExtensions -contains $_.Extension.ToLower() }
+
+# Make sure magick is installed if required
+if ($videoFiles | Select-Object -First 1 -And $magickPath -eq "") {
+    Write-Error "There are image files inside the input folder, but ImageMagick is not installed"
+    exit 1
+}
+
 # Iterate over each image file in the input folder
-$files | Where-Object { $imgExtensions -contains $_.Extension.ToLower() } | ForEach-Object {
+$imageFiles | ForEach-Object {
     $inputFile = $_.FullName
     $baseName = $_.BaseName
     $relativePath = $_.FullName.Substring($inFolderAbsolute.Length).TrimStart('\')
